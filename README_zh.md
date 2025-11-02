@@ -23,6 +23,8 @@ python -m pip install -r ComfyUI-llama-cpp/requirements.txt
 #### 模型下载:
 - 请将模型文件下载至`ComfyUI/models/LLM`目录中.  
 
+> 在使用vLLM模型处理图像之前, 请确保已经下载并选择了对应的`mmproj`权重.
+
 ## 致谢
 - [llama-cpp-python](https://github.com/JamePeng/llama-cpp-python) @JamePeng  
 - [ComfyUI-llama-cpp](https://github.com/kijai/ComfyUI-llama-cpp) @kijai
