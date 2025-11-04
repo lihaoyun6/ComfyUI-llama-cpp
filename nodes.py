@@ -124,7 +124,7 @@ def get_chat_handler(model_type):
 def get_model(config):
     model = config["model"]
     mmproj_model = config["mmproj_model"]
-    mmodel_type = config["mmodel_type"]
+    model_type = config["model_type"]
     think_mode = config["think_mode"]
     n_ctx = config["n_ctx"]
     n_gpu_layers = config["n_gpu_layers"]
@@ -133,11 +133,11 @@ def get_model(config):
     chat_handler = None
     if mmproj_model and mmproj_model != "None":
         mmproj_path = os.path.join(folder_paths.models_dir, 'LLM', mmproj_model)
-        if mmodel_type == "None":
-            raise ValueError('"mmodel_type" cannot be None!')
+        if model_type == "None":
+            raise ValueError('"model_type" cannot be None!')
         print(f"Loading mmproj from {mmproj_path}")
-        handler = get_chat_handler(mmodel_type)
-        if mmodel_type == "Qwen3-VL":
+        handler = get_chat_handler(model_type)
+        if model_type == "Qwen3-VL":
             chat_handler = handler(clip_model_path=mmproj_path, use_think_prompt=think_mode, verbose=False)
         else:
             chat_handler = handler(clip_model_path=mmproj_path, verbose=False)
@@ -151,7 +151,7 @@ class llama_cpp_model_loader:
         return {"required": {
             "model": (folder_paths.get_filename_list("LLM"),),
             "mmproj_model": (["None"]+folder_paths.get_filename_list("LLM"), {"default": "None"}),
-            "mmodel_type": (["None","Qwen3-VL", "Qwen2.5-VL", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "llama3-Vision-Alpha", "MiniCPM-v2.6", "MiniCPM-v4"], {"default": "None"}),
+            "model_type": (["None","Qwen3-VL", "Qwen2.5-VL", "LLaVA-1.5", "LLaVA-1.6", "Moondream2", "nanoLLaVA", "llama3-Vision-Alpha", "MiniCPM-v2.6", "MiniCPM-v4"], {"default": "None"}),
             "think_mode": ("BOOLEAN", {"default": False}),
             "n_ctx": ("INT", {"default": 4096, "min": 512, "max": 327680, "step": 128}),
             "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 4096, "step": 1}),
@@ -164,8 +164,8 @@ class llama_cpp_model_loader:
     FUNCTION = "loadmodel"
     CATEGORY = "llama-cpp-vllm"
 
-    def loadmodel(self, model, mmproj_model, mmodel_type, think_mode, n_ctx, n_gpu_layers, keep_model_loaded):
-        custom_config = {"model": model, "mmproj_model": mmproj_model, "mmodel_type":mmodel_type, "think_mode": think_mode, "n_ctx": n_ctx, "n_gpu_layers": n_gpu_layers, "keep_model_loaded": keep_model_loaded}
+    def loadmodel(self, model, mmproj_model, model_type, think_mode, n_ctx, n_gpu_layers, keep_model_loaded):
+        custom_config = {"model": model, "mmproj_model": mmproj_model, "model_type":model_type, "think_mode": think_mode, "n_ctx": n_ctx, "n_gpu_layers": n_gpu_layers, "keep_model_loaded": keep_model_loaded}
         return (custom_config,)
 
 class llama_cpp_instruct_adv:
