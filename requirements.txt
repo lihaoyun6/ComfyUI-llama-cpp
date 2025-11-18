@@ -1,1 +1,2 @@
 diskcache
+scipy
