@@ -349,7 +349,7 @@ class llama_cpp_parameters:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-                "max_tokens": ("INT", {"default": 512, "min": 0, "max": 4096, "step": 1}),
+                "max_tokens": ("INT", {"default": 1024, "min": 0, "max": 4096, "step": 1}),
                 "top_k": ("INT", {"default": 30, "min": 0, "max": 1000, "step": 1}),
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "min_p": ("FLOAT", {"default": 0.05, "min": 0.0, "max": 1.0, "step": 0.01}),
