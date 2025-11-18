@@ -8,6 +8,7 @@ import torch
 
 import numpy as np
 from PIL import Image, ImageDraw
+from scipy.ndimage import gaussian_filter
 
 import folder_paths
 import comfy.model_management as mm
@@ -384,7 +385,7 @@ class json_to_bbox:
         }
     
     RETURN_TYPES = ("BBOX", "IMAGE")
-    RETURN_NAMES = ("bbox", "image")
+    RETURN_NAMES = ("bboxes", "image")
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vllm"
     
@@ -400,12 +401,117 @@ class json_to_bbox:
             bbox = [tuple(item["bbox_2d"]) for item in bboxes]
         return(bbox, image,)
 
+class SEG:
+    def __init__(self, cropped_image, cropped_mask, confidence, crop_region, bbox, label, control_net_wrapper=None):
+        self.cropped_image = cropped_image
+        self.cropped_mask = cropped_mask
+        self.confidence = confidence
+        self.crop_region = crop_region
+        self.bbox = bbox
+        self.label = label
+        self.control_net_wrapper = control_net_wrapper
+        
+    def __repr__(self):
+        return f"SEG(cropped_image={self.cropped_image is not None}, cropped_mask=shape{self.cropped_mask.shape}, confidence={self.confidence}, ...)"
+    
+class bbox_to_segs:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "bboxes": ("BBOX",),
+                "image": ("IMAGE",),
+                "feather": ("INT", {"default": 10, "min": 0, "max": 100, "step": 1}),
+                "bbox_expansion": ("INT", {"default": 10, "min": 0, "max": 200, "step": 1}),
+            }
+        }
+    
+    RETURN_TYPES = ("SEGS",)
+    FUNCTION = "process"
+    CATEGORY = "llama-cpp-vllm"
+    
+    def process(self, bboxes, image, feather, bbox_expansion):
+        if not bboxes:
+            print("Warning: BBoxToSEGS received an empty BBox list. Returning empty SEGS.")
+            shape = (image.shape[1], image.shape[2])
+            return (((shape, []),))
+        
+        _batch_size, height, width, _channels = image.shape
+        mask_shape = (height, width)
+        
+        seg_list = []
+        image_for_cropping = image[0] 
+        
+        for bbox in bboxes:
+            if not isinstance(bbox, (list, tuple)) or len(bbox) < 4:
+                print(f"Warning: Skipping invalid bbox item: {bbox}")
+                continue
+            
+            x1, y1, x2, y2 = map(int, bbox)
+            x1_exp = x1 - bbox_expansion
+            y1_exp = y1 - bbox_expansion
+            x2_exp = x2 + bbox_expansion
+            y2_exp = y2 + bbox_expansion
+            
+            crop_region = [x1_exp, y1_exp, x2_exp, y2_exp]
+            crop_w = x2_exp - x1_exp
+            crop_h = y2_exp - y1_exp
+            
+            if crop_h <= 0 or crop_w <= 0:
+                print(f"Warning: Skipping bbox with invalid expanded size: {crop_region}")
+                continue
+            
+            local_mask_np = np.zeros((crop_h, crop_w), dtype=np.float32)
+            local_x1 = bbox_expansion
+            local_y1 = bbox_expansion
+            local_x2 = local_x1 + (x2 - x1)
+            local_y2 = local_y1 + (y2 - y1)
+            local_mask_np[local_y1:local_y2, local_x1:local_x2] = 1.0
+            
+            if feather > 0:
+                local_mask_np = gaussian_filter(local_mask_np, sigma=feather)
+            
+            cropped_mask_np = local_mask_np
+            cropped_img_padded = torch.zeros((crop_h, crop_w, 3), dtype=image.dtype, device=image.device)
+
+            src_x_start = max(0, x1_exp)
+            src_y_start = max(0, y1_exp)
+            src_x_end = min(width, x2_exp)
+            src_y_end = min(height, y2_exp)
+            
+            dst_x_start = src_x_start - x1_exp
+            dst_y_start = src_y_start - y1_exp
+            dst_x_end = src_x_end - x1_exp
+            dst_y_end = src_y_end - y1_exp
+            
+            if src_x_end > src_x_start and src_y_end > src_y_start:
+                source_crop = image_for_cropping[src_y_start:src_y_end, src_x_start:src_x_end, :]
+                cropped_img_padded[dst_y_start:dst_y_end, dst_x_start:dst_x_end, :] = source_crop
+                
+            cropped_image_tensor = cropped_img_padded.permute(2, 0, 1).unsqueeze(0)
+            
+            seg = SEG(
+                cropped_image=cropped_image_tensor,
+                cropped_mask=cropped_mask_np,
+                confidence=np.array([0.9], dtype=np.float32),
+                crop_region=crop_region,
+                bbox=np.array(bbox, dtype=np.float32),
+                label="bbox"
+            )
+            
+            seg_list.append(seg)
+            
+        segs = (mask_shape, seg_list)
+        
+        return (segs,)
+
 NODE_CLASS_MAPPINGS = {
     "llama_cpp_model_loader": llama_cpp_model_loader,
     "llama_cpp_instruct_adv": llama_cpp_instruct_adv,
     "llama_cpp_instruct": llama_cpp_instruct,
     "llama_cpp_parameters": llama_cpp_parameters,
-    "json_to_bbox": json_to_bbox
+    "json_to_bbox": json_to_bbox,
+    "bbox_to_segs": bbox_to_segs,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -413,5 +519,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "llama_cpp_instruct_adv": "Llama-cpp Instruct (Advanced)",
     "llama_cpp_instruct": "Llama-cpp Instruct",
     "llama_cpp_parameters": "Llama-cpp Parameters",
-    "json_to_bbox": "JSON to BBOX"
+    "json_to_bbox": "JSON to BBOX",
+    "bbox_to_segs": "BBOX to SEGS",
 }
