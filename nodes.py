@@ -235,7 +235,7 @@ class llama_cpp_instruct_adv:
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vllm"
     
-    def clean():
+    def clean(self):
         self.llm.close()
         try:
             self.chat_handler._exit_stack.close()
