@@ -142,7 +142,9 @@ def get_model(config):
     think_mode = config["think_mode"]
     n_ctx = config["n_ctx"]
     n_gpu_layers = config["n_gpu_layers"]
-
+    image_max_tokens = config["image_max_tokens"]
+    image_min_tokens = config["image_min_tokens"]
+    
     model_path = os.path.join(folder_paths.models_dir, 'LLM', model)
     handler = get_chat_handler(chat_handler)
     if mmproj_model and mmproj_model != "None":
@@ -152,9 +154,21 @@ def get_model(config):
         print(f"Loading mmproj from {mmproj_path}")
         if chat_handler == "Qwen3-VL":
             try:
-                _chat_handler = handler(clip_model_path=mmproj_path, use_think_prompt=think_mode, verbose=False)
+                print(image_max_tokens, image_min_tokens)
+                _chat_handler = handler(
+                    clip_model_path=mmproj_path,
+                    force_reasoning=think_mode,
+                    image_max_tokens=image_max_tokens,
+                    image_min_tokens=image_min_tokens,
+                    verbose=False)
             except Exception as e:
-                _chat_handler = handler(clip_model_path=mmproj_path, force_reasoning=think_mode, verbose=False)
+                if image_max_tokens > 0 or image_min_tokens > 0:
+                    raise ValueError('"image_min_tokens" and "image_max_tokens" are unavailable! Please update llama-cpp-python.')
+                else:
+                    try:
+                        _chat_handler = handler(clip_model_path=mmproj_path, force_reasoning=think_mode, verbose=False)
+                    except Exception as e:
+                        _chat_handler = handler(clip_model_path=mmproj_path, use_think_prompt=think_mode, verbose=False)
         else:
             _chat_handler = handler(clip_model_path=mmproj_path, verbose=False)
     else:
@@ -203,7 +217,7 @@ class llama_cpp_instruct_adv:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "llmamodel": ("LLAMACPPMODEL",),
+                "llamamodel": ("LLAMACPPMODEL",),
                 "parameters": ("LLAMACPPARAMS",),
                 "preset_prompt": (preset_tags, {"default": preset_tags[0]}),
                 "custom_prompt": ("STRING", {"default": "", "multiline": True, "placeholder": 'For preset hints marked with an "*", this will be used to fill the placeholder (e.g., Object names in BBox detection)\n\nOtherwise, this will override the preset prompts.'}),
@@ -245,20 +259,24 @@ class llama_cpp_instruct_adv:
         gc.collect()
         mm.soft_empty_cache()
     
-    def process(self, llmamodel, parameters, preset_prompt, custom_prompt, system_prompt, input_mode, max_frames, video_size, seed, images=None):
+    def process(self, llamamodel, parameters, preset_prompt, custom_prompt, system_prompt, input_mode, max_frames, video_size, seed, images=None):
         mm.soft_empty_cache()
-        keep_model_loaded = llmamodel['keep_model_loaded']
+        keep_model_loaded = llamamodel.get('keep_model_loaded', True)
+        llamamodel['image_min_tokens'] = parameters.get('image_min_tokens', 0) 
+        llamamodel['image_max_tokens'] = parameters.get('image_max_tokens', 0) 
+        filtered_params = {k: v for k, v in parameters.items() if k not in {'image_min_tokens', 'image_max_tokens'}}
         video_input = input_mode == "video"
 
-        if not hasattr(self, "llm") or self.current_config != llmamodel:
+        if not hasattr(self, "llm") or self.current_config != llamamodel:
+            print("[llama-cpp_vllm] Reloading model...")
             if hasattr(self, "llm"):
                 self.llm.close()
                 try:
                     self.chat_handler._exit_stack.close()
                 except Exception:
                     pass
-            self.current_config = llmamodel
-            self.chat_handler, self.llm = get_model(llmamodel)
+            self.current_config = llamamodel.copy()
+            self.chat_handler, self.llm = get_model(llamamodel)
             
         messages = []
         
@@ -297,7 +315,7 @@ class llama_cpp_instruct_adv:
                         if item.get("type") == "image_url":
                             item["image_url"]["url"] = f"data:image/jpeg;base64,{data}"
                             break
-                    output = self.llm.create_chat_completion(messages=messages, seed=seed, **parameters)
+                    output = self.llm.create_chat_completion(messages=messages, seed=seed, **filtered_params)
                     text = output['choices'][0]['message']['content']
                     text = text[2:].lstrip() if text.startswith(": ") else text.lstrip() 
                     texts.append(text)
@@ -318,7 +336,7 @@ class llama_cpp_instruct_adv:
                     user_content.append(image_content)
                     
                 messages.append({"role": "user", "content": user_content})
-                output = self.llm.create_chat_completion(messages=messages, seed=seed, **parameters)
+                output = self.llm.create_chat_completion(messages=messages, seed=seed, **filtered_params)
                 text = output['choices'][0]['message']['content']
                 text = text[2:].lstrip() if text.startswith(": ") else text.lstrip() 
         
@@ -332,7 +350,7 @@ class llama_cpp_instruct:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "llmamodel": ("LLAMACPPMODEL",),
+                "llamamodel": ("LLAMACPPMODEL",),
                 "parameters": ("LLAMACPPARAMS",),
                 "prompt": ("STRING", {"multiline": True, "default": "",}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "step": 1}),
@@ -344,19 +362,22 @@ class llama_cpp_instruct:
     FUNCTION = "process"
     CATEGORY = "llama-cpp-vllm"
     
-    def process(self, llmamodel, parameters, prompt, seed):
+    def process(self, llamamodel, parameters, prompt, seed):
         mm.soft_empty_cache()
-        keep_model_loaded = llmamodel['keep_model_loaded']
+        keep_model_loaded = llamamodel.get('keep_model_loaded', True)
+        llamamodel['image_min_tokens'] = parameters.get('image_min_tokens', 0) 
+        llamamodel['image_max_tokens'] = parameters.get('image_max_tokens', 0) 
+        filtered_params = {k: v for k, v in parameters.items() if k not in {'image_min_tokens', 'image_max_tokens'}}
         
-        if not hasattr(self, "llm") or self.current_config != llmamodel:
+        if not hasattr(self, "llm") or self.current_config != llamamodel:
             if hasattr(self, "llm"):
                 self.llm.close()
                 try:
                     self.chat_handler._exit_stack.close()
                 except Exception:
                     pass
-            self.current_config = llmamodel
-            self.chat_handler, self.llm = get_model(llmamodel)
+            self.current_config = llamamodel.copy()
+            self.chat_handler, self.llm = get_model(llamamodel)
             
         messages = []
         user_content = []
@@ -404,6 +425,8 @@ class llama_cpp_parameters:
                 "mirostat_mode": ("INT", {"default": 0, "min": 0, "max": 2, "step": 1}),
                 "mirostat_eta": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "mirostat_tau": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+                "image_min_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
+                "image_max_tokens": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 32}),
                 }
         }
     RETURN_TYPES = ("LLAMACPPARAMS",)
